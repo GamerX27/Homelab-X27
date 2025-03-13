@@ -1,0 +1,87 @@
+version: '3.9'
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - 8080:8080   # qbittorrent web interface
+      - 6881:6881   # qbittorrent torrent port
+      - 9696:9696   # prowlarr
+    volumes:
+      - /docker/gluetun:/gluetun
+    environment:
+      - TZ=Europe/Oslo
+      - VPN_SERVICE_PROVIDER=airvpn
+      - VPN_TYPE=wireguard
+      - FIREWALL_VPN_INPUT_PORTS=port
+      - WIREGUARD_PRIVATE_KEY=key
+      - WIREGUARD_PRESHARED_KEY=key
+      - WIREGUARD_ADDRESSES=ip
+      - SERVER_COUNTRIES=country
+      - SERVER_CITIES=city
+      - HEALTH_VPN_DURATION_INITIAL=120s
+    healthcheck:
+      test: ["CMD-SHELL", "ping -c 1 www.google.com || exit 1"]
+      interval: 60s
+      timeout: 20s
+      retries: 5
+    restart: unless-stopped
+
+  qbittorrent:
+    image: qbt/qbittorrent:latest
+    container_name: qbittorrent
+    ports:
+      - 8080:8080
+    volumes:
+      - /docker/qbittorrent:/config
+      - /mnt/Media/downloads:/downloads
+    
+    network_mode: service:gluetun
+    environment:
+      - TZ=Europe/Oslo
+    restart: unless-stopped
+
+  prowlarr:
+    image: qbt/prowlarr:latest
+    container_name: prowlarr
+    ports:
+      - 9696:9696
+    volumes:
+      - /portainer/Files/AppData/Config/prowlarr:/config
+    network_mode: service:gluetun
+    environment:
+      - TZ=Europe/Oslo
+    restart: unless-stopped
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    ports:
+      - 8989:8989  # Changed from 7878 to 8989
+    volumes:
+      - /portainer/Files/AppData/Config/sonarr:/config
+      - /mnt/Media:/tvseries:/tv #optional
+      - /mnt/Media/downloads:/downloads:/downloads #optional
+    environment:
+      - TZ=Europe/Oslo
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    volumes:
+      - /portainer/Files/AppData/Config/radarr:/config
+      - /mnt/Media:/movies #optional
+      - /mnt/Media/downloads:/downloads #optional
+    ports:
+      - 7878:7878
+    restart: unless-stopped
