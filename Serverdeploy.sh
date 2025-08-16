@@ -1,88 +1,72 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GREEN=$'\033[0;32m'; RED=$'\033[0;31m'; CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+# Debian-only
+[[ -f /etc/debian_version ]] || { echo "This script is for Debian-based systems only."; exit 1; }
 
-# --- Debian check ---
-if [[ ! -f /etc/debian_version ]]; then
-  echo -e "${RED}This script is for Debian-based systems only.${NC}"
-  exit 1
-fi
+# Simple colors
+GREEN=$'\033[0;32m'; CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 
-echo -e "${CYAN}${BOLD}Debian setup script${NC}"
+echo -e "${CYAN}${BOLD}Debian setup${NC}"
 
-# --- 1) Always install Docker ---
-echo -e "${CYAN}Installing Docker Engine from official Docker repository...${NC}"
+# --- 1) Always install Docker from Docker repo ---
+echo -e "${CYAN}Installing Docker Engine from Docker's official repository...${NC}"
 sudo apt update
 sudo apt install -y ca-certificates curl gnupg lsb-release
 sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg \
-  | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
+curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
   | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io
 sudo systemctl enable --now docker
-echo -e "${GREEN}✅ Docker installed and running.${NC}"
+echo -e "${GREEN}✔ Docker installed and running.${NC}"
 
-# --- 2) Always prompt for Portainer (since Docker is guaranteed) ---
-read -rp "$(echo -e "${BOLD}Install Portainer CE (Docker web UI)? [y/N]:${NC} ")" install_portainer
-if [[ "$install_portainer" =~ ^[Yy]$ ]]; then
-  echo -e "${CYAN}Installing Portainer CE...${NC}"
+# --- 2) OPTIONAL: Portainer CE (prompt always shown) ---
+read -rp "Install Portainer CE (Docker web UI)? [y/N]: " install_portainer
+if [[ "${install_portainer:-}" =~ ^[Yy]$ ]]; then
+  echo "Installing Portainer CE..."
   docker volume create portainer_data >/dev/null
-  docker run -d \
-    -p 9000:9000 -p 8000:8000 \
-    --name portainer \
-    --restart=always \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v portainer_data:/data \
-    portainer/portainer-ce
-  echo -e "${GREEN}✅ Portainer is running on http://localhost:9000${NC}"
+  # Expose HTTPS on 9443 (no 9000); single line to avoid parsing issues
+  docker run -d -p 9443:9443 --name portainer --restart=always \
+    -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data \
+    portainer/portainer-ce:latest
+  HOST_IP=$(hostname -I | awk '{print $1}')
+  echo -e "${GREEN}✔ Portainer is running at: https://${HOST_IP}:9443${NC}"
 else
-  echo -e "${CYAN}Skipping Portainer installation.${NC}"
+  echo "Skipping Portainer installation."
 fi
 
-# --- 3) Install update helper ---
+# --- 3) Install 'update' helper and run it once ---
 TARGET="/usr/local/bin/update"
-echo -e "${CYAN}${BOLD}Installing update helper to ${TARGET}...${NC}"
+echo "Installing update helper to ${TARGET}..."
 sudo tee "$TARGET" >/dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-GREEN=$'\033[0;32m'; CYAN=$'\033[0;36m'; RED=$'\033[0;31m'; BOLD=$'\033[1m'; NC=$'\033[0m'
-
-echo -e "${CYAN}${BOLD}🧼 Starting full system update...${NC}"
+GREEN=$'\033[0;32m'; CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+echo -e "${CYAN}${BOLD}Starting full system update...${NC}"
 sudo apt update
 sudo apt upgrade -y
 sudo apt autoremove -y
-
 if command -v flatpak &>/dev/null; then
-  echo -e "${GREEN}📦 Updating Flatpaks...${NC}"
+  echo "Updating Flatpaks..."
   flatpak update -y
 fi
-
 if command -v docker &>/dev/null; then
-  CONTAINER_COUNT=$(docker ps -a -q | wc -l || echo 0)
-  if [[ "$CONTAINER_COUNT" -gt 0 ]]; then
-    echo -e "${GREEN}🚀 Updating containers via Watchtower (one-time)...${NC}"
-    docker run --rm \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      containrrr/watchtower \
-      --run-once --cleanup
+  cnt=$(docker ps -a -q | wc -l || echo 0)
+  if [[ "$cnt" -gt 0 ]]; then
+    echo "Updating containers via Watchtower (one-time)..."
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --run-once --cleanup
   else
-    echo -e "${CYAN}📭 No containers found. Skipping Watchtower.${NC}"
+    echo "No containers found. Skipping Watchtower."
   fi
 else
-  echo -e "${CYAN}⚠️ Docker not installed. Skipping container updates.${NC}"
+  echo "Docker not installed. Skipping container updates."
 fi
-
-echo -e "${BOLD}${GREEN}✅ System update completed!${NC}"
+echo -e "${GREEN}${BOLD}System update completed!${NC}"
 EOF
-
-# Make helper executable
 sudo chmod +x "$TARGET"
-echo -e "${GREEN}✅ Update helper installed. Run anytime with: ${BOLD}update${NC}"
+echo -e "${GREEN}✔ Update helper installed. Run anytime with: ${BOLD}update${NC}"
 
-# Run helper now
-echo -e "${CYAN}${BOLD}Running update now...${NC}"
+echo "Running update once now..."
 sudo "$TARGET"
