@@ -26,7 +26,7 @@ sudo apt install -y docker-ce docker-ce-cli containerd.io
 sudo systemctl enable --now docker
 echo -e "${GREEN}✅ Docker installed and running.${NC}"
 
-# --- 2) Optional: Portainer ---
+# --- 2) Always prompt for Portainer (since Docker is guaranteed) ---
 read -rp "$(echo -e "${BOLD}Install Portainer CE (Docker web UI)? [y/N]:${NC} ")" install_portainer
 if [[ "$install_portainer" =~ ^[Yy]$ ]]; then
   echo -e "${CYAN}Installing Portainer CE...${NC}"
