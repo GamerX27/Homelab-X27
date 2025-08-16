@@ -75,7 +75,8 @@ fi
 
 echo -e "${BOLD}${GREEN}✅ System update completed successfully!${NC}"
 EOF
-  echo -en "${BOLD}❓ Make the script executable with chmod +x? [y/n]: ${NC}"; read -r confirm
+  printf "%b❓ Make the script executable with chmod +x? [y/n]: %b" "${BOLD}" "${NC}" > /dev/tty
+  IFS= read -r confirm < /dev/tty
   case "$confirm" in [Yy]*) sudo chmod +x "$TARGET"; echo -e "${GREEN}✅ Script is now executable. You can run it with: ${BOLD}update${NC}";; [Nn]*) echo -e "${RED}⚠️ Skipped chmod. You must run this manually if you want to execute the script:${NC}"; echo -e "${BOLD} sudo chmod +x $TARGET${NC}";; *) echo -e "${RED}Invalid choice. Defaulting to skip chmod.${NC}";; esac
 }
 
@@ -83,13 +84,17 @@ print_banner
 
 install_docker
 
-read -rp "Do you want to install Portainer CE? (Y/y = Yes, N/n = No): " ans_portainer
-if [ "$ans_portainer" = "Y" ] || [ "$ans_portainer" = "y" ]; then
-  install_portainer
-elif [ "$ans_portainer" = "N" ] || [ "$ans_portainer" = "n" ]; then
-  echo "Skipping Portainer installation."
+if [ -t 0 ] && [ -r /dev/tty ]; then
+  printf "Do you want to install Portainer CE? (Y/y = Yes, N/n = No): " > /dev/tty
+  IFS= read -r ans_portainer < /dev/tty
 else
-  echo "Invalid choice. Skipping Portainer installation."
+  ans_portainer="n"
+fi
+
+case "$ans_portainer" in
+  Y|y) install_portainer ;;
+  N|n) echo "Skipping Portainer installation." ;;
+  *)   echo "Invalid choice. Skipping Portainer installation." ;;
 fi
 
 install_update_script
