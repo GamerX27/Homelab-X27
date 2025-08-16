@@ -83,8 +83,14 @@ print_banner
 
 install_docker
 
-echo -n "Do you want to install Portainer CE? (Y/y = Yes, N/n = No): "; read -r ans_portainer
-case "$ans_portainer" in [Yy]*) install_portainer;; [Nn]*) echo "Skipping Portainer installation.";; *) echo "Invalid choice. Skipping Portainer installation.";; esac
+read -rp "Do you want to install Portainer CE? (Y/y = Yes, N/n = No): " ans_portainer
+if [ "$ans_portainer" = "Y" ] || [ "$ans_portainer" = "y" ]; then
+  install_portainer
+elif [ "$ans_portainer" = "N" ] || [ "$ans_portainer" = "n" ]; then
+  echo "Skipping Portainer installation."
+else
+  echo "Invalid choice. Skipping Portainer installation."
+fi
 
 install_update_script
 
