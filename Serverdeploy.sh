@@ -1,48 +1,42 @@
-cat > setup.sh <<'BASH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Colors (CRLF-safe)
-GREEN=$'\033[0;32m'
-RED=$'\033[0;31m'
-CYAN=$'\033[0;36m'
-BOLD=$'\033[1m'
-NC=$'\033[0m'
+# ===== Debian-only setup =====
 
-echo -e "${CYAN}${BOLD}Welcome to your system setup script!${NC}"
+# Pretty output (CRLF-safe)
+GREEN=$'\033[0;32m'; RED=$'\033[0;31m'; CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 
-# 1. Ask to install Docker from official Docker repo
-read -rp "$(echo -e "${BOLD}❓ Install Docker Engine from official Docker repository? [y/N]:${NC} ")" install_docker || true
-if [[ "${install_docker:-}" =~ ^[Yy]$ ]]; then
-  echo -e "${CYAN}➡️ Detecting OS type...${NC}"
-  if [[ -f /etc/fedora-release ]]; then
-    OS="fedora"
-  elif [[ -f /etc/debian_version ]]; then
-    OS="debian"
-  else
-    echo -e "${RED}❌ Unsupported OS. Exiting.${NC}"
-    exit 1
-  fi
+# Sanity: must be Debian/Ubuntu-family and have sudo
+[[ -f /etc/debian_version ]] || { echo -e "${RED}This script is for Debian-based systems only.${NC}"; exit 1; }
+command -v sudo >/dev/null || { echo -e "${RED}sudo is required.${NC}"; exit 1; }
 
-  # Pretty name without ${OS^} (older bash compat)
-  OS_PRETTY=$([[ $OS == debian ]] && echo Debian || echo Fedora)
-  echo -e "${GREEN}Installing Docker on ${OS_PRETTY}...${NC}"
+echo -e "${CYAN}${BOLD}Debian setup script${NC}"
 
-  if [[ $OS == debian ]]; then
-    sudo apt update
-    sudo apt install -y ca-certificates curl gnupg lsb-release
-    sudo install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    # SINGLE LINE: no backslash line-continuations (fixes the 'else' parse error on CRLF)
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
-      | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-    sudo apt update
-    sudo apt install -y docker-ce docker-ce-cli containerd.io
-  else
-    sudo dnf -y install dnf-plugins-core
-    sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-    sudo dnf install -y docker-ce docker-ce-cli containerd.io
-  fi
+confirm () {
+  local msg="$1"
+  read -rp "$msg [y/N]: " ans || true
+  [[ "${ans:-}" =~ ^[Yy]$ ]]
+}
+
+# Ensure this file has LF endings (no-op if already fine)
+sed -i 's/\r$//' "$0" 2>/dev/null || true
+
+# ===== 1) Optional: install Docker from official Docker repo =====
+if confirm "${BOLD}Install Docker Engine from Docker's official repository?${NC}"; then
+  echo -e "${CYAN}Preparing APT and Docker repo...${NC}"
+  sudo apt update
+  sudo apt install -y ca-certificates curl gnupg lsb-release
+
+  # Keyring + repo
+  sudo install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/debian/gpg \
+    | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
+    | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+
+  echo -e "${CYAN}Installing Docker packages...${NC}"
+  sudo apt update
+  sudo apt install -y docker-ce docker-ce-cli containerd.io
 
   sudo systemctl enable --now docker
   echo -e "${GREEN}✅ Docker installed and running.${NC}"
@@ -50,11 +44,10 @@ else
   echo -e "${CYAN}Skipping Docker installation.${NC}"
 fi
 
-# 2. Ask about Portainer CE
+# ===== 2) Optional: Portainer CE =====
 if command -v docker &>/dev/null; then
-  read -rp "$(echo -e "${BOLD}❓ Install Portainer CE (Docker web UI)? [y/N]:${NC} ")" install_portainer || true
-  if [[ "${install_portainer:-}" =~ ^[Yy]$ ]]; then
-    echo -e "${GREEN}📦 Installing Portainer CE...${NC}"
+  if confirm "${BOLD}Install Portainer CE (Docker web UI)?${NC}"; then
+    echo -e "${CYAN}Deploying Portainer...${NC}"
     docker volume create portainer_data >/dev/null
     docker run -d \
       -p 9000:9000 -p 8000:8000 \
@@ -63,86 +56,62 @@ if command -v docker &>/dev/null; then
       -v /var/run/docker.sock:/var/run/docker.sock \
       -v portainer_data:/data \
       portainer/portainer-ce
-    echo -e "${GREEN}✅ Portainer CE is running on port 9000.${NC}"
+    echo -e "${GREEN}✅ Portainer CE is running on http://localhost:9000${NC}"
   else
-    echo -e "${CYAN}Skipping Portainer installation.${NC}"
+    echo -e "${CYAN}Skipping Portainer.${NC}"
   fi
 else
   echo -e "${CYAN}Docker not installed—skipping Portainer step.${NC}"
 fi
 
-# 3. Deploy your update script
+# ===== 3) Install the "update" helper and run it =====
 TARGET="/usr/local/bin/update"
-echo -e "${CYAN}${BOLD}📦 Deploying update script to $TARGET...${NC}"
+echo -e "${CYAN}${BOLD}Installing update helper to ${TARGET}...${NC}"
 sudo tee "$TARGET" >/dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-
-GREEN=$'\033[0;32m'
-CYAN=$'\033[0;36m'
-RED=$'\033[0;31m'
-BOLD=$'\033[1m'
-NC=$'\033[0m'
-
+GREEN=$'\033[0;32m'; CYAN=$'\033[0;36m'; RED=$'\033[0;31m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 echo -e "${CYAN}${BOLD}🧼 Starting full system update...${NC}"
 
-# Detect package manager
-PM=""
-if command -v dnf &>/dev/null; then
-  PM="dnf"
-elif command -v apt &>/dev/null; then
-  PM="apt"
+# Debian/Ubuntu apt flow
+if command -v apt &>/dev/null; then
+  sudo apt update
+  sudo apt upgrade -y
+  sudo apt autoremove -y
 else
-  echo -e "${RED}❌ No supported package manager found (dnf or apt).${NC}"
+  echo -e "${RED}This helper expects apt (Debian/Ubuntu).${NC}"
   exit 1
 fi
 
-echo -e "${GREEN}📦 Updating system packages with $PM...${NC}"
-if [[ $PM == dnf ]]; then
-  sudo dnf upgrade --refresh -y
-else
-  sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
-fi
-
+# Flatpak (optional)
 if command -v flatpak &>/dev/null; then
   echo -e "${GREEN}📦 Updating Flatpaks...${NC}"
   flatpak update -y
 fi
 
+# Docker containers (optional)
 if command -v docker &>/dev/null; then
-  CONTAINER_COUNT=$(docker ps -a -q | wc -l)
-  if [[ "$CONTAINER_COUNT" -eq 0 ]]; then
-    echo -e "${CYAN}📭 No Docker containers found. Skipping Watchtower.${NC}"
-  else
-    echo -e "${GREEN}🚀 Running Watchtower once to update containers...${NC}"
+  CONTAINER_COUNT=$(docker ps -a -q | wc -l || echo 0)
+  if [[ "$CONTAINER_COUNT" -gt 0 ]]; then
+    echo -e "${GREEN}🚀 Updating containers via Watchtower (one-time)...${NC}"
     docker run --rm \
       -v /var/run/docker.sock:/var/run/docker.sock \
       containrrr/watchtower \
       --run-once --cleanup
+  else
+    echo -e "${CYAN}📭 No containers found. Skipping Watchtower.${NC}"
   fi
 else
   echo -e "${CYAN}⚠️ Docker not installed. Skipping container updates.${NC}"
 fi
 
-echo -e "${BOLD}${GREEN}✅ System update completed successfully!${NC}"
+echo -e "${BOLD}${GREEN}✅ System update completed!${NC}"
 EOF
 
-# Ask to chmod
-read -rp "$(echo -e "${BOLD}❓ Make the script executable now? [y/N]:${NC} ")" do_chmod || true
-if [[ "${do_chmod:-}" =~ ^[Yy]$ ]]; then
-  sudo chmod +x "$TARGET"
-  echo -e "${GREEN}✅ Script is executable. Run with: ${BOLD}update${NC}"
-else
-  echo -e "${RED}⚠️ You must manually run chmod +x $TARGET if you want to execute it.${NC}"
-fi
+# Permissions + run
+sudo chown root:root "$TARGET"
+sudo chmod 0755 "$TARGET"
+echo -e "${GREEN}Installed. Run anytime with: ${BOLD}update${NC}"
 
-# 4. Run the update script
-echo -e "${CYAN}${BOLD}🚀 Now running ${TARGET}...${NC}"
-sudo "$TARGET"
-BASH
-
-# Ensure LF endings in case your editor added CRLF
-sed -i 's/\r$//' setup.sh
-
-chmod +x setup.sh
-bash -n setup.sh && bash setup.sh
+echo -e "${CYAN}${BOLD}Running update now...${NC}"
+sudo bash "$TARGET"
