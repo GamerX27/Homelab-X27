@@ -1,7 +1,8 @@
+cat > setup.sh <<'BASH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Colors
+# Colors (CRLF-safe)
 GREEN=$'\033[0;32m'
 RED=$'\033[0;31m'
 CYAN=$'\033[0;36m'
@@ -10,9 +11,8 @@ NC=$'\033[0m'
 
 echo -e "${CYAN}${BOLD}Welcome to your system setup script!${NC}"
 
-# 1) Docker
-prompt="${BOLD}❓ Install Docker Engine from official Docker repository? [y/N]:${NC} "
-read -rp "$prompt" install_docker || true
+# 1. Ask to install Docker from official Docker repo
+read -rp "$(echo -e "${BOLD}❓ Install Docker Engine from official Docker repository? [y/N]:${NC} ")" install_docker || true
 if [[ "${install_docker:-}" =~ ^[Yy]$ ]]; then
   echo -e "${CYAN}➡️ Detecting OS type...${NC}"
   if [[ -f /etc/fedora-release ]]; then
@@ -24,16 +24,16 @@ if [[ "${install_docker:-}" =~ ^[Yy]$ ]]; then
     exit 1
   fi
 
-  # Capitalize safely without ${OS^} (works on old bash too)
-  OS_PRETTY="$OS"
-  [[ $OS == debian ]] && OS_PRETTY="Debian" || OS_PRETTY="Fedora"
-
+  # Pretty name without ${OS^} (older bash compat)
+  OS_PRETTY=$([[ $OS == debian ]] && echo Debian || echo Fedora)
   echo -e "${GREEN}Installing Docker on ${OS_PRETTY}...${NC}"
+
   if [[ $OS == debian ]]; then
     sudo apt update
     sudo apt install -y ca-certificates curl gnupg lsb-release
     sudo install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    # SINGLE LINE: no backslash line-continuations (fixes the 'else' parse error on CRLF)
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
       | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
     sudo apt update
@@ -43,16 +43,16 @@ if [[ "${install_docker:-}" =~ ^[Yy]$ ]]; then
     sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
     sudo dnf install -y docker-ce docker-ce-cli containerd.io
   fi
+
   sudo systemctl enable --now docker
   echo -e "${GREEN}✅ Docker installed and running.${NC}"
 else
   echo -e "${CYAN}Skipping Docker installation.${NC}"
 fi
 
-# 2) Portainer CE
+# 2. Ask about Portainer CE
 if command -v docker &>/dev/null; then
-  prompt="${BOLD}❓ Install Portainer CE (Docker web UI)? [y/N]:${NC} "
-  read -rp "$prompt" install_portainer || true
+  read -rp "$(echo -e "${BOLD}❓ Install Portainer CE (Docker web UI)? [y/N]:${NC} ")" install_portainer || true
   if [[ "${install_portainer:-}" =~ ^[Yy]$ ]]; then
     echo -e "${GREEN}📦 Installing Portainer CE...${NC}"
     docker volume create portainer_data >/dev/null
@@ -71,7 +71,7 @@ else
   echo -e "${CYAN}Docker not installed—skipping Portainer step.${NC}"
 fi
 
-# 3) Deploy update script
+# 3. Deploy your update script
 TARGET="/usr/local/bin/update"
 echo -e "${CYAN}${BOLD}📦 Deploying update script to $TARGET...${NC}"
 sudo tee "$TARGET" >/dev/null <<'EOF'
@@ -127,9 +127,8 @@ fi
 echo -e "${BOLD}${GREEN}✅ System update completed successfully!${NC}"
 EOF
 
-# 4) chmod and run
-prompt="${BOLD}❓ Make the script executable now? [y/N]:${NC} "
-read -rp "$prompt" do_chmod || true
+# Ask to chmod
+read -rp "$(echo -e "${BOLD}❓ Make the script executable now? [y/N]:${NC} ")" do_chmod || true
 if [[ "${do_chmod:-}" =~ ^[Yy]$ ]]; then
   sudo chmod +x "$TARGET"
   echo -e "${GREEN}✅ Script is executable. Run with: ${BOLD}update${NC}"
@@ -137,5 +136,13 @@ else
   echo -e "${RED}⚠️ You must manually run chmod +x $TARGET if you want to execute it.${NC}"
 fi
 
+# 4. Run the update script
 echo -e "${CYAN}${BOLD}🚀 Now running ${TARGET}...${NC}"
 sudo "$TARGET"
+BASH
+
+# Ensure LF endings in case your editor added CRLF
+sed -i 's/\r$//' setup.sh
+
+chmod +x setup.sh
+bash -n setup.sh && bash setup.sh
